@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Тетрис</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="stars"></div>
+
+  <main class="app">
+    <h1 class="title"><span>ТЕТ</span><span class="accent">РИС</span></h1>
+
+    <div class="layout">
+      <aside class="panel panel-left">
+        <div class="card">
+          <h2>Удержание</h2>
+          <canvas id="hold" width="120" height="120"></canvas>
+        </div>
+        <div class="card stats">
+          <h2>Статистика</h2>
+          <div class="stat"><span>Очки</span><strong id="score">0</strong></div>
+          <div class="stat"><span>Линии</span><strong id="lines">0</strong></div>
+          <div class="stat"><span>Уровень</span><strong id="level">1</strong></div>
+        </div>
+      </aside>
+
+      <div class="board-wrap">
+        <canvas id="board" width="300" height="600"></canvas>
+        <div id="overlay" class="overlay">
+          <div class="overlay-content">
+            <h2 id="overlay-title">Тетрис</h2>
+            <p id="overlay-text">Нажмите, чтобы начать</p>
+            <button id="overlay-btn">Играть</button>
+          </div>
+        </div>
+      </div>
+
+      <aside class="panel panel-right">
+        <div class="card">
+          <h2>Далее</h2>
+          <canvas id="next" width="120" height="320"></canvas>
+        </div>
+        <div class="card controls">
+          <h2>Управление</h2>
+          <ul>
+            <li><kbd>&larr;</kbd><kbd>&rarr;</kbd> Движение</li>
+            <li><kbd>&darr;</kbd> Быстрее</li>
+            <li><kbd>&uarr;</kbd> Поворот</li>
+            <li><kbd>Space</kbd> Сброс</li>
+            <li><kbd>C</kbd> Удержать</li>
+            <li><kbd>P</kbd> Пауза</li>
+          </ul>
+        </div>
+      </aside>
+    </div>
+
+    <div class="mobile-controls">
+      <button data-action="left">&larr;</button>
+      <button data-action="rotate">&#8635;</button>
+      <button data-action="right">&rarr;</button>
+      <button data-action="down">&darr;</button>
+      <button data-action="drop">&#8659;</button>
+      <button data-action="hold">C</button>
+    </div>
+  </main>
+
+  <script src="script.js"></script>
+</body>
+</html>
