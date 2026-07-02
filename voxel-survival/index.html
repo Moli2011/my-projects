@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Voxel Survival</title>
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+  <canvas id="scene"></canvas>
+  <div id="hitFlash"></div>
+  <div id="crosshair"></div>
+
+  <div id="hud">
+    <div id="healthBarWrap"><div id="healthBar"></div></div>
+    <div id="killsCounter">Убийства: <span id="killsValue">0</span></div>
+  </div>
+
+  <div id="hotbar">
+    <div class="slot selected" data-type="grass">1<span class="swatch grass"></span></div>
+    <div class="slot" data-type="dirt">2<span class="swatch dirt"></span></div>
+    <div class="slot" data-type="stone">3<span class="swatch stone"></span></div>
+    <div class="slot" data-type="wood">4<span class="swatch wood"></span></div>
+    <div class="slot" data-type="leaves">5<span class="swatch leaves"></span></div>
+  </div>
+
+  <div id="blocker">
+    <div id="menu">
+      <h1>VOXEL <span class="accent">SURVIVAL</span></h1>
+      <p>Процедурный мир, деревья и зомби, которые вас преследуют.</p>
+      <button id="startBtn">Играть</button>
+      <div class="controls-list">
+        <div><kbd>WASD</kbd> движение</div>
+        <div><kbd>Space</kbd> прыжок</div>
+        <div><kbd>ЛКМ</kbd> сломать / ударить</div>
+        <div><kbd>ПКМ</kbd> поставить блок</div>
+        <div><kbd>1-5</kbd> выбрать блок</div>
+        <div><kbd>Esc</kbd> пауза</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="deathScreen" class="hidden">
+    <h1>ВЫ ПОГИБЛИ</h1>
+    <p id="deathStats"></p>
+    <button id="respawnBtn">Играть снова</button>
+  </div>
+
+  <script type="module" src="script.js"></script>
+</body>
+</html>
