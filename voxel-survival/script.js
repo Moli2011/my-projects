@@ -10,6 +10,10 @@ const AGGRO_RANGE = 14;
 const ATTACK_RANGE = 1.35;
 const ATTACK_REACH = 4.5;
 const MAX_ZOMBIES = 10;
+const SWING_DURATION = 0.25;
+const THIRD_PERSON_DIST = 3.6;
+const THIRD_PERSON_HEIGHT = 1.1;
+const AO_LEVELS = [0.45, 0.65, 0.82, 1.0];
 
 const BLOCK_COLORS = {
   grass: { top: 0x5fb83b, side: 0x7a5230, bottom: 0x5c3a21 },
@@ -114,18 +118,32 @@ const canvas = document.getElementById('scene');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x87ceeb);
-scene.fog = new THREE.Fog(0x87ceeb, 28, 85);
+scene.background = new THREE.Color(0x8fd3f4);
+scene.fog = new THREE.Fog(0x8fd3f4, 30, 88);
 
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
 
-const ambient = new THREE.AmbientLight(0xffffff, 0.55);
-scene.add(ambient);
-const sun = new THREE.DirectionalLight(0xffffff, 0.85);
-sun.position.set(40, 60, 20);
+const hemi = new THREE.HemisphereLight(0xbfe3ff, 0x5c4a34, 0.7);
+scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xfff3d6, 1.0);
+sun.position.set(WORLD_SIZE * 0.6, 55, WORLD_SIZE * 0.35);
+sun.target.position.set(WORLD_SIZE / 2, 0, WORLD_SIZE / 2);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.left = -38;
+sun.shadow.camera.right = 38;
+sun.shadow.camera.top = 38;
+sun.shadow.camera.bottom = -38;
+sun.shadow.camera.near = 1;
+sun.shadow.camera.far = 140;
+sun.shadow.bias = -0.0015;
 scene.add(sun);
+scene.add(sun.target);
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -150,6 +168,27 @@ function varyColor(hex, x, y, z, amount) {
   const j = (hash2(x * 7 + z * 13, y * 17 + x) - 0.5) * amount;
   c.offsetHSL(0, 0, j);
   return c;
+}
+
+// Per-vertex ambient occlusion: for each face corner, look at the two blocks
+// adjacent to it in the face plane plus the diagonal block; more solid
+// neighbors -> darker corner. Standard cheap voxel-AO technique.
+function cornerAO(bx, by, bz, face, corner) {
+  const [fx, fy, fz] = face.dir;
+  const normalAxis = fx !== 0 ? 0 : fy !== 0 ? 1 : 2;
+  const tangents = [0, 1, 2].filter((a) => a !== normalAxis);
+  const [t1, t2] = tangents;
+  const base = [bx + fx, by + fy, bz + fz];
+  const sign1 = corner[t1] === 0 ? -1 : 1;
+  const sign2 = corner[t2] === 0 ? -1 : 1;
+  const side1Pos = base.slice(); side1Pos[t1] += sign1;
+  const side2Pos = base.slice(); side2Pos[t2] += sign2;
+  const cornerPos = base.slice(); cornerPos[t1] += sign1; cornerPos[t2] += sign2;
+  const side1 = !!getBlock(side1Pos[0], side1Pos[1], side1Pos[2]);
+  const side2 = !!getBlock(side2Pos[0], side2Pos[1], side2Pos[2]);
+  const cornerB = !!getBlock(cornerPos[0], cornerPos[1], cornerPos[2]);
+  if (side1 && side2) return AO_LEVELS[0];
+  return AO_LEVELS[3 - (side1 + side2 + cornerB)];
 }
 
 function rebuildWorldMesh() {
@@ -179,7 +218,8 @@ function rebuildWorldMesh() {
       for (const c of face.corners) {
         buf.positions.push(x + c[0], y + c[1], z + c[2]);
         buf.normals.push(face.dir[0], face.dir[1], face.dir[2]);
-        buf.colors.push(col.r, col.g, col.b);
+        const ao = cornerAO(x, y, z, face, c);
+        buf.colors.push(col.r * ao, col.g * ao, col.b * ao);
       }
       buf.indices.push(startIndex, startIndex + 1, startIndex + 2, startIndex, startIndex + 2, startIndex + 3);
       buf.count += 4;
@@ -196,14 +236,43 @@ function rebuildWorldMesh() {
     geo.setIndex(new THREE.Uint32BufferAttribute(buf.indices, 1));
     const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
     const mesh = new THREE.Mesh(geo, mat);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
     scene.add(mesh);
     worldMeshes[type] = mesh;
   }
 }
 
 // --- player / controls ---
-const controls = new PointerLockControls(camera, renderer.domElement);
-scene.add(controls.getObject());
+// PointerLockControls drives an invisible rig (position + look quaternion);
+// the real camera is derived from it each frame so it can be pulled back
+// behind the player in third-person view.
+const playerRig = new THREE.Object3D();
+const controls = new PointerLockControls(playerRig, renderer.domElement);
+scene.add(playerRig);
+scene.add(camera);
+
+let viewMode = 'first';
+
+function syncCamera() {
+  if (viewMode === 'first') {
+    camera.position.copy(playerRig.position);
+    camera.quaternion.copy(playerRig.quaternion);
+    playerBody.visible = false;
+    swordViewModel.visible = true;
+  } else {
+    const back = new THREE.Vector3(0, 0, 1).applyQuaternion(playerRig.quaternion);
+    const desired = playerRig.position.clone()
+      .addScaledVector(back, THIRD_PERSON_DIST)
+      .add(new THREE.Vector3(0, THIRD_PERSON_HEIGHT * 0.3, 0));
+    const minY = groundHeight(desired.x, desired.z) + 0.6;
+    if (desired.y < minY) desired.y = minY;
+    camera.position.copy(desired);
+    camera.quaternion.copy(playerRig.quaternion);
+    playerBody.visible = true;
+    swordViewModel.visible = false;
+  }
+}
 
 const blocker = document.getElementById('blocker');
 const startBtn = document.getElementById('startBtn');
@@ -224,6 +293,7 @@ const keys = {};
 document.addEventListener('keydown', (e) => {
   keys[e.code] = true;
   if (e.code === 'Space') jump();
+  if (e.code === 'KeyF') viewMode = viewMode === 'first' ? 'third' : 'first';
   if (e.code >= 'Digit1' && e.code <= 'Digit5') selectSlot(Number(e.code.slice(-1)) - 1);
 });
 document.addEventListener('keyup', (e) => { keys[e.code] = false; });
@@ -242,13 +312,13 @@ controls.addEventListener('unlock', () => { if (!gameOver) blocker.classList.rem
 
 function spawnPlayer() {
   const cx = WORLD_SIZE / 2, cz = WORLD_SIZE / 2;
-  camera.position.set(cx, groundHeight(cx, cz) + EYE_HEIGHT, cz);
+  playerRig.position.set(cx, groundHeight(cx, cz) + EYE_HEIGHT, cz);
   verticalVelocity = 0;
   onGround = true;
 }
 
 function isHorizontallyBlocked(x, z) {
-  const feetY = camera.position.y - EYE_HEIGHT;
+  const feetY = playerRig.position.y - EYE_HEIGHT;
   const bx = Math.floor(x), bz = Math.floor(z);
   for (let dy = 0; dy <= 1; dy++) {
     if (getBlock(bx, Math.floor(feetY) + dy, bz)) return true;
@@ -261,17 +331,17 @@ function updatePlayer(delta) {
   const forward = (keys['KeyW'] ? 1 : 0) - (keys['KeyS'] ? 1 : 0);
   const strafe = (keys['KeyD'] ? 1 : 0) - (keys['KeyA'] ? 1 : 0);
 
-  const prevX = camera.position.x, prevZ = camera.position.z;
+  const prevX = playerRig.position.x, prevZ = playerRig.position.z;
   controls.moveForward(forward * speed);
   controls.moveRight(strafe * speed);
-  camera.position.x = clamp(camera.position.x, 1, WORLD_SIZE - 2);
-  camera.position.z = clamp(camera.position.z, 1, WORLD_SIZE - 2);
-  if (isHorizontallyBlocked(camera.position.x, prevZ)) camera.position.x = prevX;
-  if (isHorizontallyBlocked(camera.position.x, camera.position.z)) camera.position.z = prevZ;
+  playerRig.position.x = clamp(playerRig.position.x, 1, WORLD_SIZE - 2);
+  playerRig.position.z = clamp(playerRig.position.z, 1, WORLD_SIZE - 2);
+  if (isHorizontallyBlocked(playerRig.position.x, prevZ)) playerRig.position.x = prevX;
+  if (isHorizontallyBlocked(playerRig.position.x, playerRig.position.z)) playerRig.position.z = prevZ;
 
-  const ground = groundHeight(camera.position.x, camera.position.z);
+  const ground = groundHeight(playerRig.position.x, playerRig.position.z);
   if (!onGround) verticalVelocity -= GRAVITY * delta;
-  let feetY = (camera.position.y - EYE_HEIGHT) + verticalVelocity * delta;
+  let feetY = (playerRig.position.y - EYE_HEIGHT) + verticalVelocity * delta;
   if (feetY <= ground) {
     feetY = ground;
     verticalVelocity = 0;
@@ -279,7 +349,10 @@ function updatePlayer(delta) {
   } else {
     onGround = false;
   }
-  camera.position.y = feetY + EYE_HEIGHT;
+  playerRig.position.y = feetY + EYE_HEIGHT;
+
+  const moving = (forward !== 0 || strafe !== 0) && onGround;
+  updatePlayerBody(delta, moving);
 }
 
 function damagePlayer(amount) {
@@ -322,10 +395,13 @@ function selectSlot(i) {
 slots.forEach((s, i) => s.addEventListener('click', () => selectSlot(i)));
 
 // --- raycasting for block break/place ---
+function playerLookDir() {
+  return new THREE.Vector3(0, 0, -1).applyQuaternion(playerRig.quaternion);
+}
+
 function raycastBlock(maxDist = 6, step = 0.04) {
-  const dir = new THREE.Vector3();
-  camera.getWorldDirection(dir);
-  const origin = camera.position.clone();
+  const dir = playerLookDir();
+  const origin = playerRig.position.clone();
   let lastEmpty = null;
   for (let t = 0; t < maxDist; t += step) {
     const p = origin.clone().addScaledVector(dir, t);
@@ -342,6 +418,7 @@ renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
 renderer.domElement.addEventListener('mousedown', (e) => {
   if (!controls.isLocked || gameOver) return;
   if (e.button === 0) {
+    triggerSwing();
     const target = getTargetZombie();
     if (target) {
       attackZombie(target);
@@ -356,9 +433,9 @@ renderer.domElement.addEventListener('mousedown', (e) => {
     const hit = raycastBlock();
     if (hit && hit.placeAt) {
       const { x, y, z } = hit.placeAt;
-      const feetY = Math.floor(camera.position.y - EYE_HEIGHT);
-      const headY = Math.floor(camera.position.y);
-      const inPlayer = Math.floor(camera.position.x) === x && Math.floor(camera.position.z) === z && (y === feetY || y === headY);
+      const feetY = Math.floor(playerRig.position.y - EYE_HEIGHT);
+      const headY = Math.floor(playerRig.position.y);
+      const inPlayer = Math.floor(playerRig.position.x) === x && Math.floor(playerRig.position.z) === z && (y === feetY || y === headY);
       if (!inPlayer) {
         setBlock(x, y, z, selectedBlockType);
         rebuildWorldMesh();
@@ -367,11 +444,121 @@ renderer.domElement.addEventListener('mousedown', (e) => {
   }
 });
 
+// --- sword ---
+function buildSwordMesh() {
+  const group = new THREE.Group();
+  const bladeMat = new THREE.MeshLambertMaterial({ color: 0xd7d9dd });
+  const guardMat = new THREE.MeshLambertMaterial({ color: 0xcfa53a });
+  const handleMat = new THREE.MeshLambertMaterial({ color: 0x5c3a21 });
+
+  const blade = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.62, 0.03), bladeMat);
+  blade.position.set(0, 0.5, 0);
+  const guard = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.06, 0.06), guardMat);
+  guard.position.set(0, 0.16, 0);
+  const handle = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.22, 0.08), handleMat);
+  handle.position.set(0, 0.02, 0);
+
+  group.add(blade, guard, handle);
+  group.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+  return group;
+}
+
+const swordViewModel = buildSwordMesh();
+const SWORD_REST = { pos: [0.32, -0.35, -0.55], rot: [-0.3, 0.4, -0.9] };
+swordViewModel.position.set(...SWORD_REST.pos);
+swordViewModel.rotation.set(...SWORD_REST.rot);
+camera.add(swordViewModel);
+
+// --- player body (visible in third-person) ---
+function buildPlayerMesh() {
+  const group = new THREE.Group();
+  const skin = new THREE.MeshLambertMaterial({ color: 0xd8a072 });
+  const shirt = new THREE.MeshLambertMaterial({ color: 0x3a6ea5 });
+  const pants = new THREE.MeshLambertMaterial({ color: 0x2b3550 });
+
+  const legGeo = new THREE.BoxGeometry(0.28, 0.8, 0.28);
+  const legL = new THREE.Mesh(legGeo, pants);
+  legL.position.set(-0.15, 0.4, 0);
+  const legR = new THREE.Mesh(legGeo, pants);
+  legR.position.set(0.15, 0.4, 0);
+
+  const torsoGeo = new THREE.BoxGeometry(0.6, 0.75, 0.35);
+  const torso = new THREE.Mesh(torsoGeo, shirt);
+  torso.position.set(0, 1.175, 0);
+
+  const armGeo = new THREE.BoxGeometry(0.25, 0.7, 0.25);
+  const armL = new THREE.Mesh(armGeo, skin);
+  armL.position.set(-0.42, 1.15, 0);
+
+  const armPivotR = new THREE.Group();
+  armPivotR.position.set(0.42, 1.5, 0);
+  const armR = new THREE.Mesh(armGeo, skin);
+  armR.position.set(0, -0.35, 0);
+  armPivotR.add(armR);
+
+  const sword = buildSwordMesh();
+  sword.scale.setScalar(0.9);
+  sword.position.set(0, -0.32, 0.02);
+  sword.rotation.set(-0.15, 0, 0);
+  armR.add(sword);
+
+  const headGeo = new THREE.BoxGeometry(0.42, 0.42, 0.42);
+  const head = new THREE.Mesh(headGeo, skin);
+  head.position.set(0, 1.78, 0);
+
+  group.add(legL, legR, torso, armL, armPivotR, head);
+  group.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  group.visible = false;
+  return { group, armPivotR, legL, legR };
+}
+
+const playerParts = buildPlayerMesh();
+const playerBody = playerParts.group;
+scene.add(playerBody);
+
+let swinging = false;
+let swingTime = 0;
+let walkCycle = 0;
+
+function triggerSwing() {
+  swinging = true;
+  swingTime = 0;
+}
+
+function updatePlayerBody(delta, moving) {
+  if (moving) {
+    walkCycle += delta * 8;
+    playerParts.legL.rotation.x = Math.sin(walkCycle) * 0.5;
+    playerParts.legR.rotation.x = -Math.sin(walkCycle) * 0.5;
+  } else {
+    playerParts.legL.rotation.x *= 0.8;
+    playerParts.legR.rotation.x *= 0.8;
+  }
+
+  let swing = 0;
+  if (swinging) {
+    swingTime += delta;
+    const t = Math.min(swingTime / SWING_DURATION, 1);
+    swing = Math.sin(t * Math.PI);
+    if (t >= 1) swinging = false;
+  }
+  swordViewModel.rotation.x = SWORD_REST.rot[0] - swing * 1.1;
+  swordViewModel.rotation.z = SWORD_REST.rot[2] + swing * 0.6;
+  swordViewModel.position.z = SWORD_REST.pos[2] - swing * 0.15;
+  playerParts.armPivotR.rotation.x = -swing * 1.6;
+
+  playerBody.position.set(playerRig.position.x, playerRig.position.y - EYE_HEIGHT, playerRig.position.z);
+  const euler = new THREE.Euler().setFromQuaternion(playerRig.quaternion, 'YXZ');
+  playerBody.rotation.y = euler.y;
+}
+
 // --- zombies ---
 function buildZombieMesh() {
   const group = new THREE.Group();
   const skin = new THREE.MeshLambertMaterial({ color: 0x2e6b3e, emissive: 0x000000 });
   const clothes = new THREE.MeshLambertMaterial({ color: 0x35424a, emissive: 0x000000 });
+  const eyeMat = new THREE.MeshBasicMaterial({ color: 0xc8ff3c });
+  const mouthMat = new THREE.MeshLambertMaterial({ color: 0x2a1414 });
 
   const legGeo = new THREE.BoxGeometry(0.28, 0.8, 0.28);
   const legL = new THREE.Mesh(legGeo, clothes);
@@ -393,7 +580,17 @@ function buildZombieMesh() {
   const head = new THREE.Mesh(headGeo, skin);
   head.position.set(0, 1.78, 0);
 
-  group.add(legL, legR, torso, armL, armR, head);
+  const eyeGeo = new THREE.BoxGeometry(0.07, 0.07, 0.03);
+  const eyeL = new THREE.Mesh(eyeGeo, eyeMat);
+  eyeL.position.set(-0.11, 1.82, -0.21);
+  const eyeR = new THREE.Mesh(eyeGeo, eyeMat);
+  eyeR.position.set(0.11, 1.82, -0.21);
+
+  const mouth = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.05, 0.03), mouthMat);
+  mouth.position.set(0, 1.68, -0.21);
+
+  group.add(legL, legR, torso, armL, armR, head, eyeL, eyeR, mouth);
+  group.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
   return group;
 }
 
@@ -433,9 +630,9 @@ class Zombie {
   }
   takeDamage(dmg) {
     this.hp -= dmg;
-    this.group.traverse((o) => { if (o.isMesh) o.material.emissive.setHex(0xff0000); });
+    this.group.traverse((o) => { if (o.isMesh && o.material.emissive) o.material.emissive.setHex(0xff0000); });
     setTimeout(() => {
-      this.group.traverse((o) => { if (o.isMesh) o.material.emissive.setHex(0x000000); });
+      this.group.traverse((o) => { if (o.isMesh && o.material.emissive) o.material.emissive.setHex(0x000000); });
     }, 120);
     return this.hp <= 0;
   }
@@ -448,7 +645,7 @@ function randomZombieSpot(minDistFromPlayer) {
   for (let i = 0; i < 30; i++) {
     const x = 2 + Math.random() * (WORLD_SIZE - 4);
     const z = 2 + Math.random() * (WORLD_SIZE - 4);
-    if (Math.hypot(x - camera.position.x, z - camera.position.z) >= minDistFromPlayer) return [x, z];
+    if (Math.hypot(x - playerRig.position.x, z - playerRig.position.z) >= minDistFromPlayer) return [x, z];
   }
   return [WORLD_SIZE / 2 + 5, WORLD_SIZE / 2 + 5];
 }
@@ -464,15 +661,15 @@ function spawnInitialZombies() {
 }
 
 function getTargetZombie() {
-  const camDir = new THREE.Vector3();
-  camera.getWorldDirection(camDir);
+  const lookDir = playerLookDir();
+  const origin = playerRig.position;
   let best = null, bestDist = Infinity;
   for (const z of zombies) {
-    const toZ = new THREE.Vector3(z.x - camera.position.x, z.y + 1 - camera.position.y, z.z - camera.position.z);
+    const toZ = new THREE.Vector3(z.x - origin.x, z.y + 1 - origin.y, z.z - origin.z);
     const dist = toZ.length();
     if (dist > ATTACK_REACH) continue;
     toZ.normalize();
-    const angle = camDir.angleTo(toZ);
+    const angle = lookDir.angleTo(toZ);
     if (angle < 0.3 && dist < bestDist) {
       bestDist = dist;
       best = z;
@@ -502,7 +699,7 @@ function animate() {
 
   if (controls.isLocked && !gameOver) {
     updatePlayer(delta);
-    for (const z of zombies) z.update(delta, camera.position);
+    for (const z of zombies) z.update(delta, playerRig.position);
     zombieSpawnTimer += delta;
     if (zombieSpawnTimer > 8) {
       zombieSpawnTimer = 0;
@@ -510,6 +707,7 @@ function animate() {
     }
   }
 
+  syncCamera();
   renderer.render(scene, camera);
 }
 
