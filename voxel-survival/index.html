@@ -21,7 +21,12 @@
 
   <div id="hud">
     <div id="healthBarWrap"><div id="healthBar"></div></div>
-    <div id="killsCounter">Убийства: <span id="killsValue">0</span></div>
+    <div id="hungerBarWrap"><div id="hungerBar"></div></div>
+    <div id="statsRow">
+      <div id="killsCounter">Убийства: <span id="killsValue">0</span></div>
+      <div id="meatCounter">Мясо: <span id="meatValue">0</span></div>
+    </div>
+    <div id="eatHint" class="hidden"><kbd>E</kbd> съесть мясо</div>
   </div>
 
   <div id="hotbar">
@@ -35,7 +40,7 @@
   <div id="blocker">
     <div id="menu">
       <h1>VOXEL <span class="accent">SURVIVAL</span></h1>
-      <p>Процедурный мир, деревья и зомби, которые вас преследуют.</p>
+      <p>Процедурный мир, день сменяет ночь, зомби преследуют, а голод не дремлет.</p>
       <button id="startBtn">Играть</button>
       <div class="controls-list">
         <div><kbd>WASD</kbd> движение</div>
@@ -43,9 +48,11 @@
         <div><kbd>ЛКМ</kbd> сломать / ударить мечом</div>
         <div><kbd>ПКМ</kbd> поставить блок</div>
         <div><kbd>1-5</kbd> выбрать блок</div>
+        <div><kbd>E</kbd> съесть мясо</div>
         <div><kbd>F</kbd> от 1-го / 3-го лица</div>
         <div><kbd>Esc</kbd> пауза</div>
       </div>
+      <p class="hint">Свиньи бродят по миру и дропают мясо — следите за голодом, иначе начнёте терять здоровье.</p>
     </div>
   </div>
 

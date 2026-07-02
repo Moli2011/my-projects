@@ -10,10 +10,24 @@ const AGGRO_RANGE = 14;
 const ATTACK_RANGE = 1.35;
 const ATTACK_REACH = 4.5;
 const MAX_ZOMBIES = 10;
+const MAX_PIGS = 8;
 const SWING_DURATION = 0.25;
 const THIRD_PERSON_DIST = 3.6;
 const THIRD_PERSON_HEIGHT = 1.1;
 const AO_LEVELS = [0.45, 0.65, 0.82, 1.0];
+const FACE_SUBDIV = 4;
+
+const DAY_DURATION = 180; // seconds of daylight
+const NIGHT_DURATION = 180; // seconds of night
+const FULL_CYCLE = DAY_DURATION + NIGHT_DURATION;
+const SKY_DAY = new THREE.Color(0x8fd3f4);
+const SKY_NIGHT = new THREE.Color(0x060812);
+const SKY_HORIZON = new THREE.Color(0xf3a25c);
+
+const HUNGER_DECAY_PER_SEC = 100 / 300; // empties over 5 min of play
+const STARVE_DAMAGE_INTERVAL = 4;
+const STARVE_DAMAGE = 3;
+const HUNGER_FROM_MEAT = 35;
 
 const BLOCK_COLORS = {
   grass: { top: 0x5fb83b, side: 0x7a5230, bottom: 0x5c3a21 },
@@ -123,33 +137,118 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x8fd3f4);
-scene.fog = new THREE.Fog(0x8fd3f4, 30, 88);
+scene.background = new THREE.Color(SKY_DAY);
+scene.fog = new THREE.Fog(SKY_DAY.getHex(), 30, 88);
 
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
 
 const hemi = new THREE.HemisphereLight(0xbfe3ff, 0x5c4a34, 0.7);
 scene.add(hemi);
-const sun = new THREE.DirectionalLight(0xfff3d6, 1.0);
-sun.position.set(WORLD_SIZE * 0.6, 55, WORLD_SIZE * 0.35);
-sun.target.position.set(WORLD_SIZE / 2, 0, WORLD_SIZE / 2);
-sun.castShadow = true;
-sun.shadow.mapSize.set(2048, 2048);
-sun.shadow.camera.left = -38;
-sun.shadow.camera.right = 38;
-sun.shadow.camera.top = 38;
-sun.shadow.camera.bottom = -38;
-sun.shadow.camera.near = 1;
-sun.shadow.camera.far = 140;
-sun.shadow.bias = -0.0015;
-scene.add(sun);
-scene.add(sun.target);
+
+function makeSunLight(color) {
+  const light = new THREE.DirectionalLight(color, 0);
+  light.target.position.set(WORLD_SIZE / 2, 0, WORLD_SIZE / 2);
+  light.shadow.mapSize.set(2048, 2048);
+  light.shadow.camera.left = -38;
+  light.shadow.camera.right = 38;
+  light.shadow.camera.top = 38;
+  light.shadow.camera.bottom = -38;
+  light.shadow.camera.near = 1;
+  light.shadow.camera.far = 220;
+  light.shadow.bias = -0.0015;
+  scene.add(light);
+  scene.add(light.target);
+  return light;
+}
+const sun = makeSunLight(0xfff3d6);
+const moonLight = makeSunLight(0x9db4d9);
+
+// --- sky bodies ---
+const sunMesh = new THREE.Mesh(new THREE.IcosahedronGeometry(4.2, 0), new THREE.MeshBasicMaterial({ color: 0xfff4d6, fog: false }));
+const moonMesh = new THREE.Mesh(new THREE.IcosahedronGeometry(3.2, 0), new THREE.MeshBasicMaterial({ color: 0xd7e3f0, fog: false }));
+scene.add(sunMesh, moonMesh);
+
+// --- clouds ---
+const cloudMat = new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, opacity: 0.88 });
+const clouds = [];
+function buildCloud() {
+  const group = new THREE.Group();
+  const puffCount = 3 + Math.floor(Math.random() * 3);
+  for (let i = 0; i < puffCount; i++) {
+    const w = 3 + Math.random() * 3, h = 1.1, d = 2 + Math.random() * 2;
+    const box = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), cloudMat);
+    box.position.set((Math.random() - 0.5) * 5, (Math.random() - 0.5) * 0.4, (Math.random() - 0.5) * 3.5);
+    group.add(box);
+  }
+  return group;
+}
+const CLOUD_MARGIN = 24;
+const CLOUD_SPAN = WORLD_SIZE + CLOUD_MARGIN * 2;
+for (let i = 0; i < 14; i++) {
+  const cloud = buildCloud();
+  cloud.position.set(
+    -CLOUD_MARGIN + Math.random() * CLOUD_SPAN,
+    26 + Math.random() * 8,
+    -CLOUD_MARGIN + Math.random() * CLOUD_SPAN
+  );
+  cloud.userData.speed = 0.4 + Math.random() * 0.5;
+  scene.add(cloud);
+  clouds.push(cloud);
+}
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
+
+// --- day / night cycle ---
+let dayClock = FULL_CYCLE * 0.25; // start at noon, not sunrise
+let daylight = 1;
+const _skyColor = new THREE.Color();
+
+function updateSky(delta, center) {
+  dayClock = (dayClock + delta) % FULL_CYCLE;
+  const sunAngle = (dayClock / FULL_CYCLE) * Math.PI * 2;
+  const moonAngle = sunAngle + Math.PI;
+  const sunHeight = Math.sin(sunAngle);
+  const moonHeight = Math.sin(moonAngle);
+  daylight = Math.max(0, sunHeight);
+  const moonlight = Math.max(0, moonHeight);
+
+  const skyRadius = 140;
+  sunMesh.position.set(center.x + Math.cos(sunAngle) * skyRadius, sunHeight * skyRadius, center.z - 20);
+  moonMesh.position.set(center.x + Math.cos(moonAngle) * skyRadius, moonHeight * skyRadius, center.z - 20);
+  sunMesh.visible = sunHeight > -0.05;
+  moonMesh.visible = moonHeight > -0.05;
+
+  sun.position.set(center.x + Math.cos(sunAngle) * 60, Math.max(sunHeight, 0.05) * 60 + 20, center.z + 15);
+  sun.target.position.set(center.x, 0, center.z);
+  sun.intensity = daylight;
+  sun.castShadow = daylight >= moonlight;
+
+  moonLight.position.set(center.x + Math.cos(moonAngle) * 60, Math.max(moonHeight, 0.05) * 60 + 20, center.z + 15);
+  moonLight.target.position.set(center.x, 0, center.z);
+  moonLight.intensity = moonlight * 0.28;
+  moonLight.castShadow = moonlight > daylight;
+
+  hemi.intensity = 0.22 + daylight * 0.5 + moonlight * 0.08;
+
+  const horizonMix = Math.max(0, 1 - Math.abs(sunHeight) * 3.5);
+  _skyColor.lerpColors(SKY_NIGHT, SKY_DAY, daylight);
+  _skyColor.lerp(SKY_HORIZON, horizonMix * 0.45);
+  scene.background.copy(_skyColor);
+  scene.fog.color.copy(_skyColor);
+  cloudMat.color.copy(_skyColor).lerp(new THREE.Color(0xffffff), 0.55 + daylight * 0.25);
+  cloudMat.opacity = 0.55 + daylight * 0.35;
+}
+
+function updateClouds(delta) {
+  for (const cloud of clouds) {
+    cloud.position.x += cloud.userData.speed * delta;
+    if (cloud.position.x > WORLD_SIZE + CLOUD_MARGIN) cloud.position.x = -CLOUD_MARGIN;
+  }
+}
 
 // --- face-culled voxel mesh building ---
 const FACES = [
@@ -191,6 +290,63 @@ function cornerAO(bx, by, bz, face, corner) {
   return AO_LEVELS[3 - (side1 + side2 + cornerB)];
 }
 
+function lerp3(a, b, t) {
+  return [lerp(a[0], b[0], t), lerp(a[1], b[1], t), lerp(a[2], b[2], t)];
+}
+
+// Fine per-subcell brightness jitter so faces read as grainy/textured
+// instead of one flat color, purely via geometry + vertex colors.
+function subcellGrain(pos, salt) {
+  const gx = Math.round(pos[0] * 53), gy = Math.round(pos[1] * 71), gz = Math.round(pos[2] * 97);
+  return hash2(gx + gz * 3 + salt, gy * 7 - gx + salt * 31);
+}
+
+// Subdivides a block face into an NxN grid, bilinearly interpolating
+// position and per-corner AO across it, and stamping each subcell with
+// its own grain color so blocks aren't a single flat polygon/color.
+function emitFace(buf, bx, by, bz, face, baseColor, type) {
+  const aoVals = face.corners.map((c) => cornerAO(bx, by, bz, face, c));
+  const macroPos = face.corners.map((c) => [bx + c[0], by + c[1], bz + c[2]]);
+  const n = FACE_SUBDIV;
+  const grainAmount = type === 'leaves' || type === 'grass' ? 0.28 : 0.16;
+  const jitterAmount = type === 'leaves' ? 0.055 : 0;
+
+  const grid = [];
+  for (let i = 0; i <= n; i++) {
+    grid[i] = [];
+    const u = i / n;
+    const topPos = lerp3(macroPos[0], macroPos[1], u);
+    const botPos = lerp3(macroPos[3], macroPos[2], u);
+    const topAO = lerp(aoVals[0], aoVals[1], u);
+    const botAO = lerp(aoVals[3], aoVals[2], u);
+    for (let j = 0; j <= n; j++) {
+      const v = j / n;
+      grid[i][j] = { pos: lerp3(topPos, botPos, v), ao: lerp(topAO, botAO, v) };
+    }
+  }
+
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < n; j++) {
+      const cell = [grid[i][j], grid[i + 1][j], grid[i + 1][j + 1], grid[i][j + 1]];
+      const startIndex = buf.count;
+      for (const c of cell) {
+        let pos = c.pos;
+        if (jitterAmount) {
+          const j2 = (subcellGrain(pos, 999) - 0.5) * jitterAmount;
+          pos = [pos[0] + face.dir[0] * j2, pos[1] + face.dir[1] * j2, pos[2] + face.dir[2] * j2];
+        }
+        const grain = 1 + (subcellGrain(c.pos, 17) - 0.5) * grainAmount;
+        buf.positions.push(pos[0], pos[1], pos[2]);
+        buf.normals.push(face.dir[0], face.dir[1], face.dir[2]);
+        const shade = grain * c.ao;
+        buf.colors.push(baseColor.r * shade, baseColor.g * shade, baseColor.b * shade);
+      }
+      buf.indices.push(startIndex, startIndex + 1, startIndex + 2, startIndex, startIndex + 2, startIndex + 3);
+      buf.count += 4;
+    }
+  }
+}
+
 function rebuildWorldMesh() {
   for (const type in worldMeshes) {
     scene.remove(worldMeshes[type]);
@@ -214,15 +370,7 @@ function rebuildWorldMesh() {
       if (getBlock(nx, ny, nz)) continue;
       const baseColor = colors[face.key];
       const col = varyColor(baseColor, x, y, z, type === 'leaves' ? 0.08 : 0.04);
-      const startIndex = buf.count;
-      for (const c of face.corners) {
-        buf.positions.push(x + c[0], y + c[1], z + c[2]);
-        buf.normals.push(face.dir[0], face.dir[1], face.dir[2]);
-        const ao = cornerAO(x, y, z, face, c);
-        buf.colors.push(col.r * ao, col.g * ao, col.b * ao);
-      }
-      buf.indices.push(startIndex, startIndex + 1, startIndex + 2, startIndex, startIndex + 2, startIndex + 3);
-      buf.count += 4;
+      emitFace(buf, x, y, z, face, col, type);
     }
   }
 
@@ -280,23 +428,57 @@ const deathScreen = document.getElementById('deathScreen');
 const deathStats = document.getElementById('deathStats');
 const respawnBtn = document.getElementById('respawnBtn');
 const healthBar = document.getElementById('healthBar');
+const hungerBar = document.getElementById('hungerBar');
 const killsValueEl = document.getElementById('killsValue');
+const meatValueEl = document.getElementById('meatValue');
+const eatHint = document.getElementById('eatHint');
 const hitFlash = document.getElementById('hitFlash');
 
 let playerHP = 100;
+let hunger = 100;
+let meat = 0;
+let starveTimer = 0;
 let kills = 0;
 let gameOver = false;
 let verticalVelocity = 0;
 let onGround = true;
+
+function updateMeatUI() {
+  meatValueEl.textContent = meat;
+  eatHint.classList.toggle('hidden', meat <= 0);
+}
+
+function eatMeat() {
+  if (gameOver || meat <= 0 || hunger >= 100) return;
+  meat--;
+  hunger = clamp(hunger + HUNGER_FROM_MEAT, 0, 100);
+  hungerBar.style.width = hunger + '%';
+  updateMeatUI();
+}
 
 const keys = {};
 document.addEventListener('keydown', (e) => {
   keys[e.code] = true;
   if (e.code === 'Space') jump();
   if (e.code === 'KeyF') viewMode = viewMode === 'first' ? 'third' : 'first';
+  if (e.code === 'KeyE') eatMeat();
   if (e.code >= 'Digit1' && e.code <= 'Digit5') selectSlot(Number(e.code.slice(-1)) - 1);
 });
 document.addEventListener('keyup', (e) => { keys[e.code] = false; });
+
+function updateHunger(delta) {
+  hunger = clamp(hunger - HUNGER_DECAY_PER_SEC * delta, 0, 100);
+  hungerBar.style.width = hunger + '%';
+  if (hunger <= 0) {
+    starveTimer += delta;
+    if (starveTimer >= STARVE_DAMAGE_INTERVAL) {
+      starveTimer = 0;
+      damagePlayer(STARVE_DAMAGE);
+    }
+  } else {
+    starveTimer = 0;
+  }
+}
 
 function jump() {
   if (onGround && !gameOver) {
@@ -374,6 +556,11 @@ function die() {
 respawnBtn.addEventListener('click', () => {
   playerHP = 100;
   healthBar.style.width = '100%';
+  hunger = 100;
+  hungerBar.style.width = '100%';
+  starveTimer = 0;
+  meat = 0;
+  updateMeatUI();
   kills = 0;
   killsValueEl.textContent = '0';
   gameOver = false;
@@ -419,9 +606,10 @@ renderer.domElement.addEventListener('mousedown', (e) => {
   if (!controls.isLocked || gameOver) return;
   if (e.button === 0) {
     triggerSwing();
-    const target = getTargetZombie();
+    const target = getTargetEntity();
     if (target) {
-      attackZombie(target);
+      if (target.kind === 'zombie') attackZombie(target.entity);
+      else attackPig(target.entity);
     } else {
       const hit = raycastBlock();
       if (hit) {
@@ -660,22 +848,25 @@ function spawnInitialZombies() {
   for (let i = 0; i < 6; i++) spawnRandomZombie();
 }
 
-function getTargetZombie() {
+function getTargetEntity() {
   const lookDir = playerLookDir();
   const origin = playerRig.position;
-  let best = null, bestDist = Infinity;
-  for (const z of zombies) {
-    const toZ = new THREE.Vector3(z.x - origin.x, z.y + 1 - origin.y, z.z - origin.z);
-    const dist = toZ.length();
-    if (dist > ATTACK_REACH) continue;
-    toZ.normalize();
-    const angle = lookDir.angleTo(toZ);
+  let best = null, bestKind = null, bestDist = Infinity;
+  const consider = (e, kind, headOffset) => {
+    const toE = new THREE.Vector3(e.x - origin.x, e.y + headOffset - origin.y, e.z - origin.z);
+    const dist = toE.length();
+    if (dist > ATTACK_REACH) return;
+    toE.normalize();
+    const angle = lookDir.angleTo(toE);
     if (angle < 0.3 && dist < bestDist) {
       bestDist = dist;
-      best = z;
+      best = e;
+      bestKind = kind;
     }
-  }
-  return best;
+  };
+  for (const z of zombies) consider(z, 'zombie', 1);
+  for (const p of pigs) consider(p, 'pig', 0.4);
+  return best ? { entity: best, kind: bestKind } : null;
 }
 
 function attackZombie(z) {
@@ -691,6 +882,135 @@ function attackZombie(z) {
 
 let zombieSpawnTimer = 0;
 
+// --- pigs ---
+function buildPigMesh() {
+  const group = new THREE.Group();
+  const skin = new THREE.MeshLambertMaterial({ color: 0xf0a6b8 });
+  const snoutMat = new THREE.MeshLambertMaterial({ color: 0xd9829a });
+
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.42, 0.9), skin);
+  body.position.set(0, 0.5, 0);
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.36, 0.38), skin);
+  head.position.set(0, 0.56, -0.58);
+  const snout = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.16, 0.08), snoutMat);
+  snout.position.set(0, 0.5, -0.79);
+
+  const legGeo = new THREE.BoxGeometry(0.15, 0.3, 0.15);
+  const legPositions = [[-0.18, 0.15, -0.32], [0.18, 0.15, -0.32], [-0.18, 0.15, 0.32], [0.18, 0.15, 0.32]];
+  const legs = legPositions.map((p) => {
+    const l = new THREE.Mesh(legGeo, skin);
+    l.position.set(p[0], p[1], p[2]);
+    return l;
+  });
+
+  group.add(body, head, snout, ...legs);
+  group.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  return group;
+}
+
+class Pig {
+  constructor(x, z) {
+    this.x = x;
+    this.z = z;
+    this.y = groundHeight(x, z);
+    this.hp = 60;
+    this.speed = 0.9 + Math.random() * 0.5;
+    this.wanderDir = Math.random() * Math.PI * 2;
+    this.wanderTimer = 1 + Math.random() * 4;
+    this.moving = false;
+    this.group = buildPigMesh();
+    this.group.position.set(this.x, this.y, this.z);
+    this.group.rotation.y = this.wanderDir;
+    scene.add(this.group);
+  }
+  update(delta) {
+    this.wanderTimer -= delta;
+    if (this.wanderTimer <= 0) {
+      this.wanderDir = Math.random() * Math.PI * 2;
+      this.wanderTimer = 1.5 + Math.random() * 4;
+      this.moving = Math.random() < 0.6;
+      this.group.rotation.y = this.wanderDir;
+    }
+    if (this.moving) {
+      this.x += Math.sin(this.wanderDir) * this.speed * delta;
+      this.z += Math.cos(this.wanderDir) * this.speed * delta;
+    }
+    this.x = clamp(this.x, 1, WORLD_SIZE - 2);
+    this.z = clamp(this.z, 1, WORLD_SIZE - 2);
+    this.y = groundHeight(this.x, this.z);
+    this.group.position.set(this.x, this.y, this.z);
+  }
+  takeDamage(dmg) {
+    this.hp -= dmg;
+    this.group.traverse((o) => { if (o.isMesh && o.material.emissive) o.material.emissive.setHex(0xff0000); });
+    setTimeout(() => {
+      this.group.traverse((o) => { if (o.isMesh && o.material.emissive) o.material.emissive.setHex(0x000000); });
+    }, 120);
+    return this.hp <= 0;
+  }
+  dispose() { scene.remove(this.group); }
+}
+
+const pigs = [];
+
+function randomPigSpot() {
+  for (let i = 0; i < 30; i++) {
+    const x = 2 + Math.random() * (WORLD_SIZE - 4);
+    const z = 2 + Math.random() * (WORLD_SIZE - 4);
+    if (Math.hypot(x - playerRig.position.x, z - playerRig.position.z) >= 5) return [x, z];
+  }
+  return [WORLD_SIZE / 2 + 5, WORLD_SIZE / 2 - 5];
+}
+
+function spawnRandomPig() {
+  if (pigs.length >= MAX_PIGS || gameOver) return;
+  const [x, z] = randomPigSpot();
+  pigs.push(new Pig(x, z));
+}
+
+function spawnInitialPigs() {
+  for (let i = 0; i < 5; i++) spawnRandomPig();
+}
+
+// --- meat pickups ---
+const pickupMat = new THREE.MeshLambertMaterial({ color: 0xb5453a });
+const pickups = [];
+
+function spawnMeatPickup(x, y, z) {
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.22, 0.22), pickupMat);
+  mesh.castShadow = true;
+  mesh.position.set(x + (Math.random() - 0.5) * 0.4, y + 0.35, z + (Math.random() - 0.5) * 0.4);
+  scene.add(mesh);
+  pickups.push({ mesh, baseY: mesh.position.y, phase: Math.random() * Math.PI * 2 });
+}
+
+function updatePickups(delta, playerPos) {
+  for (let i = pickups.length - 1; i >= 0; i--) {
+    const p = pickups[i];
+    p.phase += delta * 3;
+    p.mesh.position.y = p.baseY + Math.sin(p.phase) * 0.08;
+    p.mesh.rotation.y += delta * 1.5;
+    const dist = Math.hypot(p.mesh.position.x - playerPos.x, p.mesh.position.z - playerPos.z);
+    if (dist < 1.0 && Math.abs(p.mesh.position.y - (playerPos.y - EYE_HEIGHT)) < 2) {
+      scene.remove(p.mesh);
+      pickups.splice(i, 1);
+      meat++;
+      updateMeatUI();
+    }
+  }
+}
+
+function attackPig(p) {
+  const dead = p.takeDamage(34);
+  if (dead) {
+    p.dispose();
+    pigs.splice(pigs.indexOf(p), 1);
+    const dropCount = 1 + (Math.random() < 0.5 ? 1 : 0);
+    for (let i = 0; i < dropCount; i++) spawnMeatPickup(p.x, p.y, p.z);
+    setTimeout(spawnRandomPig, 5000);
+  }
+}
+
 // --- main loop ---
 const clock = new THREE.Clock();
 function animate() {
@@ -699,7 +1019,12 @@ function animate() {
 
   if (controls.isLocked && !gameOver) {
     updatePlayer(delta);
+    updateHunger(delta);
+    updateSky(delta, playerRig.position);
+    updateClouds(delta);
     for (const z of zombies) z.update(delta, playerRig.position);
+    for (const p of pigs) p.update(delta);
+    updatePickups(delta, playerRig.position);
     zombieSpawnTimer += delta;
     if (zombieSpawnTimer > 8) {
       zombieSpawnTimer = 0;
@@ -715,4 +1040,5 @@ generateWorld();
 rebuildWorldMesh();
 spawnPlayer();
 spawnInitialZombies();
+spawnInitialPigs();
 animate();
