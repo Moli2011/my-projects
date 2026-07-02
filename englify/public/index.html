@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#202124">
+  <title>Englify — учи английский с ИИ</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+  <!-- Top app bar -->
+  <header class="appbar" id="appbar" hidden>
+    <div class="appbar-inner">
+      <a class="logo" href="#" id="logoHome">
+        <span class="l-o1">E</span><span class="l-o2">n</span><span class="l-o3">g</span><span class="l-o1">l</span><span class="l-o4">i</span><span class="l-o2">f</span><span class="l-o1">y</span>
+      </a>
+      <div class="appbar-right">
+        <span class="chip chip-xp" id="chipXp" title="Опыт"><span class="ico">⭐</span><span id="xpVal">0</span> XP</span>
+        <span class="chip chip-streak" id="chipStreak" title="Дней подряд"><span class="ico">🔥</span><span id="streakVal">0</span></span>
+        <button class="btn-premium-mini" id="btnGoPremium" title="Premium"><span class="ico">👑</span></button>
+        <button class="avatar-btn" id="avatarBtn" title="Профиль"><img id="avatarImg" alt="" hidden><span id="avatarLetter">?</span></button>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+
+    <!-- ===== Login ===== -->
+    <section class="view" id="view-login">
+      <div class="login-wrap">
+        <div class="login-card">
+          <div class="logo logo-big">
+            <span class="l-o1">E</span><span class="l-o2">n</span><span class="l-o3">g</span><span class="l-o1">l</span><span class="l-o4">i</span><span class="l-o2">f</span><span class="l-o1">y</span>
+          </div>
+          <h1>Учи английский с&nbsp;ИИ</h1>
+          <p class="muted">Упражнения генерирует ИИ — каждый раз новые, под твой уровень</p>
+          <div id="googleBtnHolder"></div>
+          <div id="devLoginHolder" hidden>
+            <input class="text-input" id="devName" placeholder="Ваше имя" value="">
+            <button class="btn btn-primary" id="btnDevLogin">Войти (тестовый режим)</button>
+            <p class="muted small">Вход через Google появится после настройки Client ID (см. README)</p>
+          </div>
+          <div class="login-features">
+            <div><span class="ico c-orange">🧠</span> Задания от ИИ</div>
+            <div><span class="ico c-green">📈</span> Уровни A1–C1</div>
+            <div><span class="ico c-amber">🔥</span> Стрики и XP</div>
+            <div><span class="ico c-red">🎧</span> Аудирование</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== Home ===== -->
+    <section class="view" id="view-home" hidden>
+      <div class="container">
+        <h2 id="greeting">Привет!</h2>
+        <p class="muted" id="homeSub">Выбери тип упражнения и начнём</p>
+
+        <div class="stats-row">
+          <div class="stat-card"><div class="stat-num c-orange" id="stDone">0</div><div class="stat-label">упражнений</div></div>
+          <div class="stat-card"><div class="stat-num c-green" id="stAcc">—</div><div class="stat-label">точность</div></div>
+          <div class="stat-card"><div class="stat-num c-amber" id="stStreak">0</div><div class="stat-label">дней подряд</div></div>
+          <div class="stat-card"><div class="stat-num c-red" id="stXp">0</div><div class="stat-label">XP</div></div>
+        </div>
+
+        <div class="level-row">
+          <span class="level-label">Уровень:</span>
+          <div class="level-chips" id="levelChips"></div>
+        </div>
+
+        <div class="type-grid">
+          <button class="type-card" data-type="mix">
+            <span class="ico tc-icon c-orange">🔀</span>
+            <span class="tc-title">Микс</span><span class="tc-sub">Все типы вперемешку</span>
+          </button>
+          <button class="type-card" data-type="mchoice">
+            <span class="ico tc-icon c-green">✅</span>
+            <span class="tc-title">Тест</span><span class="tc-sub">Выбор из вариантов</span>
+          </button>
+          <button class="type-card" data-type="gap">
+            <span class="ico tc-icon c-amber">✏️</span>
+            <span class="tc-title">Пропуски</span><span class="tc-sub">Вставь слово</span>
+          </button>
+          <button class="type-card" data-type="translate">
+            <span class="ico tc-icon c-red">🌐</span>
+            <span class="tc-title">Перевод</span><span class="tc-sub">С русского на английский</span>
+          </button>
+          <button class="type-card" data-type="order">
+            <span class="ico tc-icon c-orange">🧩</span>
+            <span class="tc-title">Конструктор</span><span class="tc-sub">Собери предложение</span>
+          </button>
+          <button class="type-card" data-type="listen">
+            <span class="ico tc-icon c-green">🎧</span>
+            <span class="tc-title">Аудирование</span><span class="tc-sub">Слушай и печатай</span>
+          </button>
+        </div>
+
+        <div class="banner-premium" id="premiumBanner" hidden>
+          <span class="ico">👑</span>
+          <div><b>Englify Premium</b><br><span class="muted" id="premiumBannerText">Безлимитные упражнения и ИИ-проверка перевода</span></div>
+          <button class="btn btn-primary" id="btnBannerPremium">Подробнее</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== Exercise ===== -->
+    <section class="view" id="view-exercise" hidden>
+      <div class="container container-narrow">
+        <div class="ex-top">
+          <button class="btn-icon" id="btnExClose" title="Назад"><span class="ico">←</span></button>
+          <div class="ex-meta"><span id="exTypeLabel"></span> · <span id="exLevelLabel"></span></div>
+          <span class="chip chip-count" id="exCounter"></span>
+        </div>
+        <div class="card ex-card" id="exCard">
+          <div id="exLoading" class="ex-loading" hidden>
+            <div class="g-spinner"></div>
+            <p class="muted">ИИ готовит упражнение…</p>
+          </div>
+          <div id="exBody"></div>
+          <div class="ex-feedback" id="exFeedback" hidden></div>
+          <div class="ex-actions">
+            <button class="btn btn-primary" id="btnCheck">Проверить</button>
+            <button class="btn btn-primary" id="btnNext" hidden>Дальше</button>
+            <button class="btn btn-text" id="btnAiCheck" hidden><span class="ico">🧠</span>Проверить с ИИ</button>
+          </div>
+        </div>
+        <p class="muted small center" id="exSource"></p>
+      </div>
+    </section>
+
+    <!-- ===== Premium ===== -->
+    <section class="view" id="view-premium" hidden>
+      <div class="container container-narrow">
+        <button class="btn-icon" id="btnPremiumBack" title="Назад"><span class="ico">←</span></button>
+        <h2 class="center">Englify <span class="c-orange">Premium</span></h2>
+        <p class="muted center">Оплата через DonationAlerts</p>
+        <div class="plans">
+          <div class="card plan">
+            <h3>Бесплатно</h3>
+            <div class="plan-price">0 ₽</div>
+            <ul class="plan-list">
+              <li><span class="ico c-green">✓</span><span id="freeLimitText">15 упражнений в день</span></li>
+              <li><span class="ico c-green">✓</span>Все типы заданий</li>
+              <li><span class="ico c-grey">✕</span>ИИ-проверка перевода</li>
+            </ul>
+          </div>
+          <div class="card plan plan-pro">
+            <div class="plan-badge">Рекомендуем</div>
+            <h3>Premium</h3>
+            <div class="plan-price"><span id="premPrice">199</span> ₽<span class="plan-per">/ <span id="premDays">30</span> дней</span></div>
+            <ul class="plan-list">
+              <li><span class="ico c-green">✓</span>Безлимитные упражнения</li>
+              <li><span class="ico c-green">✓</span>ИИ-проверка свободного перевода</li>
+              <li><span class="ico c-green">✓</span>Поддержка проекта ❤️</li>
+            </ul>
+          </div>
+        </div>
+        <div class="card pay-card" id="payCard">
+          <h3><span class="ico c-amber">💛</span> Как оплатить</h3>
+          <ol class="pay-steps">
+            <li>Скопируйте ваш код: <button class="pay-code" id="payCode" title="Скопировать">EN-XXXXXX <span class="ico">📋</span></button></li>
+            <li>Отправьте донат на сумму от <b><span id="payPrice">199</span> ₽</b>, указав этот код в сообщении:<br>
+              <a class="btn btn-primary" id="donateLink" target="_blank" rel="noopener">Открыть DonationAlerts</a>
+              <span class="muted small" id="donateNotConfigured" hidden>(ссылка на донат появится после настройки, см. README)</span>
+            </li>
+            <li>Вернитесь сюда и нажмите: <button class="btn btn-outline" id="btnCheckPay">Я оплатил — проверить</button></li>
+          </ol>
+          <p class="muted small" id="payStatus"></p>
+        </div>
+        <div class="card premium-active" id="premiumActiveCard" hidden>
+          <span class="ico c-green big-icon">✅</span>
+          <h3>Premium активен</h3>
+          <p class="muted">Действует до <b id="premiumUntilText"></b></p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== Profile ===== -->
+    <section class="view" id="view-profile" hidden>
+      <div class="container container-narrow">
+        <button class="btn-icon" id="btnProfileBack" title="Назад"><span class="ico">←</span></button>
+        <div class="card profile-card">
+          <img id="profileImg" class="profile-img" alt="" hidden>
+          <div class="profile-letter" id="profileLetter">?</div>
+          <h2 id="profileName"></h2>
+          <p class="muted" id="profileEmail"></p>
+          <p id="profilePremium"></p>
+          <div class="stats-row">
+            <div class="stat-card"><div class="stat-num c-orange" id="pDone">0</div><div class="stat-label">упражнений</div></div>
+            <div class="stat-num-wrap stat-card"><div class="stat-num c-green" id="pAcc">—</div><div class="stat-label">точность</div></div>
+            <div class="stat-card"><div class="stat-num c-amber" id="pStreak">0</div><div class="stat-label">стрик</div></div>
+            <div class="stat-card"><div class="stat-num c-red" id="pXp">0</div><div class="stat-label">XP</div></div>
+          </div>
+          <button class="btn btn-outline" id="btnLogout"><span class="ico">🚪</span>Выйти</button>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <div class="snackbar" id="snackbar" hidden></div>
+  <script src="app.js"></script>
+</body>
+</html>

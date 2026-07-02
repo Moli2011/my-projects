@@ -1,0 +1,12 @@
+{
+  "name": "englify",
+  "version": "1.0.0",
+  "description": "English learning site powered by Claude Code CLI (subscription, no API key)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}

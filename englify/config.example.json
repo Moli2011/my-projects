@@ -1,0 +1,16 @@
+{
+  "port": 3000,
+  "googleClientId": "ВАШ_CLIENT_ID.apps.googleusercontent.com",
+  "daClientId": "ID приложения DonationAlerts",
+  "daClientSecret": "Секрет приложения DonationAlerts",
+  "daRedirectUri": "http://localhost:3000/api/da/callback",
+  "daDonateUrl": "https://www.donationalerts.com/r/ваш_ник",
+  "premiumPriceRub": 199,
+  "premiumDays": 30,
+  "freeDailyLimit": 15,
+  "adminEmails": ["forworkingmine@gmail.com"],
+  "aiProvider": "auto",
+  "ollamaUrl": "http://localhost:11434",
+  "ollamaModel": "qwen2.5:3b",
+  "claudeModel": "sonnet"
+}
